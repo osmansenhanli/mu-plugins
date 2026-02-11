@@ -1,0 +1,436 @@
+<?php
+/**
+ * Plugin Name: Global Helper Functions
+ * Description: A collection of helper functions that all plugins/themes can use.
+ * Version:     1.0
+ * Author:      Osman Senhanli
+ */
+
+// In functions.php or an MU-plugin:
+
+/**************** PAGE REDIRECTS ****************************************/
+
+// Redirect product category pages to the /books page
+add_action( 'template_redirect', function() {
+    if ( is_tax( 'product_cat' ) ) {
+        wp_redirect( home_url( '/books' ), 301 );
+        exit;
+    }
+});
+
+/*************************************************************************
+ * ******************   MAUTIC TRACKING  *********************************
+ * **********************************************************************/
+/**
+ * Plugin Name: iFun Mautic Tracker
+ * Description: Injects the Mautic tracking script on every public page.
+ */
+
+if (!defined('ABSPATH')) exit;
+
+// === CONFIG: set your Mautic base URL (no trailing slash) ===
+if (!defined('IFUN_MAUTIC_BASE')) {
+  define('IFUN_MAUTIC_BASE', 'https://ifunlearning.com.au/mautic');
+}
+
+// Optional: don’t track logged-in admins/editors
+function ifun_should_track_mautic(){
+  if (is_user_logged_in() && current_user_can('edit_pages')) return false;
+  return true;
+}
+
+// Optional: require a consent cookie (rename to your cookie if needed)
+// return true to always track
+/*
+function ifun_has_consent(){
+  // Example: only fire if "ifun_consent=1"
+  return (isset($_COOKIE['ifun_consent']) && $_COOKIE['ifun_consent'] === '1');
+}
+*/
+
+add_action('wp_head', function () {
+  if (!ifun_should_track_mautic()) return;
+  // If you don’t use consent gating, change to: if (!ifun_has_consent()) return;
+  // Or simply comment the next line out.
+//  if (!ifun_has_consent()) return;
+
+  $base = esc_url(IFUN_MAUTIC_BASE);
+  ?>
+  <!-- Mautic Tracking -->
+  <script>
+  (function(w,d,t,u,n,a,m){w['MauticTrackingObject']=n;w[n]=w[n]||function(){
+    (w[n].q=w[n].q||[]).push(arguments)};a=d.createElement(t),m=d.getElementsByTagName(t)[0];
+    a.async=1;a.src=u;m.parentNode.insertBefore(a,m)
+  })(window,document,'script','<?php echo $base; ?>/mtc.js','mt');
+  mt('send','pageview');
+  </script>
+  <noscript>
+    <img src="<?php echo $base; ?>/mtracking.gif" style="display:none;" alt="" />
+  </noscript>
+  <!-- /Mautic Tracking -->
+  <?php
+}, 99);
+
+
+
+/*************************************************************************
+ * ******************   GLOBAL FUNCTIONS *********************************
+ * **********************************************************************/
+
+if ( ! function_exists( 'get_book_type' ) ) {
+    function get_book_type() {
+        // default
+        $type = 'us-book';
+
+        if ( function_exists( 'geoip_detect2_get_info_from_current_ip' ) ) {
+            $info = geoip_detect2_get_info_from_current_ip();
+            if ( ! empty( $info->country->isoCode ) && 'AU' === $info->country->isoCode ) {
+                $type = 'au-book';
+            }
+        }
+
+        return $type;
+    }
+}
+
+/**
+ * Plugin Name: Perfmatters PDF Viewer Exclusions
+ */
+
+if ( ! function_exists( 'custom_perfmatters_skip_on_pdf_viewer' ) ) {
+
+    function custom_perfmatters_skip_on_pdf_viewer( $skip ) {
+        if ( strpos( $_SERVER['REQUEST_URI'] ?? '', '/v.html' ) !== false
+          || strpos( $_SERVER['REQUEST_URI'] ?? '', '/view-pdf/' ) !== false
+        ) {
+            return true;
+        }
+        return $skip;
+    }
+
+    add_filter( 'perfmatters_exclude_defer_js',     'custom_perfmatters_skip_on_pdf_viewer' );
+    add_filter( 'perfmatters_exclude_delay_js',     'custom_perfmatters_skip_on_pdf_viewer' );
+    add_filter( 'perfmatters_exclude_lazy_loading', 'custom_perfmatters_skip_on_pdf_viewer' );
+    add_filter( 'perfmatters_exclude_instant_page', 'custom_perfmatters_skip_on_pdf_viewer' );
+    add_filter( 'perfmatters_exclude_unused_css',   'custom_perfmatters_skip_on_pdf_viewer' );
+
+}
+
+
+if ( ! function_exists( 'render_email_template' ) ) {
+    function render_email_template($template, $params = []) {
+        extract($params); // makes $first_name, $book_link, etc. available in template
+        ob_start();
+        include WP_PLUGIN_DIR . "/ifun-emails/{$template}.php";
+        return ob_get_clean();
+    }
+}
+
+// 1. Return the GeoIP info object (or null)
+if ( ! function_exists( 'ifun_geoip_get_info' ) ) {
+    function ifun_geoip_get_info() {
+        if ( function_exists( 'geoip_detect2_get_info_from_current_ip' ) ) {
+            return geoip_detect2_get_info_from_current_ip();
+        }
+        return null;
+    }
+}
+
+/**
+ * Helper function to send email from services@ifunlearning.com with a standard signature.
+ *
+ * @param string $to Recipient email.
+ * @param string $subject Email subject.
+ * @param string $message Email body.
+ */
+if ( ! function_exists( 'ifun_send_mail' ) ) {
+    function ifun_send_mail($to, $subject, $message, $headers = array()) {
+        $from = "services@ifunlearning.com";
+        
+        // Default headers
+        $default_headers = array(
+            "Content-Type: text/html; charset=UTF-8",
+            "From: iFunLearning Services Team <$from>"
+        );
+
+        // Merge headers (so caller can add Bcc, Cc, etc.)
+        if (!empty($headers)) {
+            if (is_array($headers)) {
+                $headers = array_merge($default_headers, $headers);
+            } else {
+                // if caller passes string instead of array
+                $headers = array_merge($default_headers, array($headers));
+            }
+        } else {
+            $headers = $default_headers;
+        }
+        
+        // Convert newlines to <br> tags so that they display in HTML.
+        $message = nl2br($message);
+        
+        // Append a signature using HTML line breaks.
+        $signature = "<br>Best regards,<br>Services Team<br>services@ifunlearning.com<br><a href='https://ifunlearning.com'>iFunLearning</a>";
+        $message .= $signature;
+        
+        return wp_mail($to, $subject, $message, $headers);
+    }
+}
+
+// 2. Return Country, State (or just State/Country) or City
+if ( ! function_exists( 'ifun_get_geo_location' ) ) {
+    /**
+     * @param string $type 'full' (Country, State), 'country', 'state', or 'city'
+     * @return string
+     */
+    function ifun_get_geo_location( $type = 'full' ) {
+        $geo = ifun_geoip_get_info();
+        if ( ! $geo ) {
+            return '';
+        }
+
+        $country = $geo->country->name                     ?? '';
+        $state   = $geo->mostSpecificSubdivision->name      ?? '';
+        $city    = $geo->city->name                        ?? '';
+
+        switch ( $type ) {
+            case 'country':
+                return $country;
+            case 'state':
+                if ( empty( $state ) || $state === $country ) {
+                    return $country;
+                }
+                return $state;
+            case 'city':
+                return $city;
+            case 'full':
+            default:
+                $parts = array_filter( [ $country, $state ] );
+                return implode( ', ', $parts );
+        }
+    }
+}
+
+if ( ! function_exists( 'ifun_adbox_render' ) ) {
+    /**
+     * Render the adbox HTML+CSS.
+     *
+     * @param array $args {
+     *   @type string $icon        Emoji or HTML icon.
+     *   @type string $title       Box title.
+     *   @type string $content     Box body text.
+     *   @type string $button_text Button label.
+     *   @type string $button_link Button URL.
+     *   @type string $float       'left' or 'right'.
+     * }
+     * @return string
+     */
+    function ifun_adbox_render( $args ) {
+        $defaults = [
+            'icon'        => '',
+            'title'       => '',
+            'content'     => '',
+            'button_text' => '',
+            'button_link' => '#',
+            'float'       => 'right',
+            'subject'     => '', // NEW
+            'year'        => '', // NEW
+        ];
+        $a = wp_parse_args( $args, $defaults );
+
+        $float_class = ( $a['float'] === 'left' )
+            ? 'ifun-float-left'
+            : 'ifun-float-right';
+            
+        // build optional attributes
+        $subject_attr = !empty($a['subject']) ? ' data-subject="'.esc_attr($a['subject']).'"' : '';
+        $year_attr    = !empty($a['year'])    ? ' data-year="'.esc_attr($a['year']).'"'       : '';
+
+        ob_start();
+        ?>
+        <div class="ifun-adbox <?= esc_attr( $float_class ) ?>">
+            <div class="ifun-adbox-header">
+                <span class="ifun-adbox-icon"><?= esc_html( $a['icon'] ) ?></span>
+                <strong><?= esc_html( $a['title'] ) ?></strong>
+            </div>
+            <div class="ifun-adbox-content">
+                <p><?= esc_html( $a['content'] ) ?></p>
+                <a href="<?= esc_url( $a['button_link'] ) ?>"
+                   class="ifun-adbox-button"
+                   <?= $subject_attr.$year_attr ?>
+                   rel="noopener">
+                   <?= esc_html( $a['button_text'] ) ?>
+                </a>
+            </div>
+        </div>
+        <style>
+        .ifun-adbox {
+            background: #fffbe9;
+            border: 1px solid #e0dca4;
+            padding: .8em;
+            border-radius: 8px;
+            font-family: sans-serif;
+            font-size: .82rem;
+            line-height: 1.4;
+            width: 250px;
+            max-width: 280px;
+            margin: .5em 0 1em 1em;
+            box-sizing: border-box;
+            vertical-align: top;
+        }
+        .ifun-float-right { float: right; display: inline-block; margin:0 20% 1em 1em; }
+        .ifun-float-left  { float: left;  display: inline-block; margin:0 2em 1em 0; }
+        @media (max-width:768px) {
+          .ifun-adbox,
+          .ifun-float-left,
+          .ifun-float-right {
+              float:none!important;
+              width:100%!important;
+              max-width:100%!important;
+              margin:1em 0!important;
+          }
+        }
+        .ifun-adbox-header { display:flex; align-items:center; margin-bottom:.3em; font-size:.92rem; font-weight:600; }
+        .ifun-adbox-icon   { margin-right:.5em; font-size:1.25rem; }
+        .ifun-adbox-content p { margin:0 0 .5em; font-size:.82rem; }
+        .ifun-adbox-button { display:inline-block; background:#DCDAD4; color:#fff; padding:.35em .75em; border-radius:4px; text-decoration:none; font-size:.8rem; white-space:nowrap; }
+        .ifun-adbox-button:hover { background:#F2DC8A; }
+        </style>
+        <?php
+        return ob_get_clean();
+    }
+}
+
+if ( ! function_exists( 'ifun_adbox_shortcode' ) ) {
+    /**
+     * [ifun_adbox id="workbooks" float="left"]
+     */
+    function ifun_adbox_shortcode( $atts ) {
+        $ad_configs = [
+            'workbooks' => [
+                'icon' => '🎨',
+                'title' => 'See the student books',
+                'content' => 'Help cohorts practise skills through ready-to-use, instruction-free activities.',
+                'button_text' => 'See Free Samples',
+                'button_link' => '/samples',
+            ],
+    
+            'va-quiz' => [
+                'icon' => '📝',
+                'title' => 'Diagnose your cohort',
+                'content' => 'Quickly pinpoint learning-skill gaps in your cohorts.',
+                'button_text' => 'View Quiz Demo',
+                'button_link' => '/quizzes/',
+            ],
+    
+            'rec-engine' => [
+                'icon' => '🧭',
+                'title' => 'Select activities',
+                'content' => 'Receive activity recommendations for your cohort.',
+                'button_text' => 'Get Recommendations',
+                'button_link' => '/recommendations',
+            ]
+        ];
+
+        $a = shortcode_atts( [
+            'id'    => '',
+            'float' => 'right',
+            'subject'=> '',   // NEW
+            'year'   => '',   // NEW
+        ], $atts, 'ifun_adbox' );
+
+        if ( ! isset( $ad_configs[ $a['id'] ] ) ) {
+            return '';
+        }
+
+        // merge the config + float into one array and render
+        $args = $ad_configs[ $a['id'] ];
+        $args['float'] = $a['float'];
+        $args['subject'] = $a['subject']; // NEW
+        $args['year']    = $a['year'];    // NEW        
+
+        return ifun_adbox_render( $args );
+    }
+    add_shortcode( 'ifun_adbox', 'ifun_adbox_shortcode' );
+}
+
+if ( ! function_exists( 'ifun_detailed_adbox_shortcode' ) ) {
+    /**
+     * [ifun_detailed_adbox icon="🎨" title="…" content="…" button_text="…" button_link="…" float="left"]
+     */
+    function ifun_detailed_adbox_shortcode( $atts ) {
+        // simply pass everything straight to the renderer
+        return ifun_adbox_render( $atts );
+    }
+    add_shortcode( 'ifun_detailed_adbox', 'ifun_detailed_adbox_shortcode' );
+}
+
+// -----------------------------------------------------------------------------
+// WCPT: force strike-through on variation labels via JS fallback
+// -----------------------------------------------------------------------------
+add_action( 'wp_footer', function(){
+  if ( ! class_exists('WC_Product_Variation') ) return;
+  ?>
+  <script>
+  jQuery(function($){
+    $('.wcpt-select-variation').each(function(){
+      var $label    = $(this),
+          variation = $label.data('wcpt-variation'),
+          $input    = $label.find('input[type=radio]').first();
+
+      if ( ! variation || ! variation.price_html ) return;
+
+      // clean out screen-reader bits
+      var price = variation.price_html
+                     .replace(/<span class="screen-reader-text">.*?<\/span>/g,'')
+                     .trim();
+      // 1) Pull the last bit after " - "
+      var parts = variation.display_name.split(' - '),
+          name  = parts.pop().trim();
+      
+      // rebuild label
+      $input = $input.detach();
+      $label.empty()
+            .append($input)
+            .append('<span class="wcpt-variation-label">'+ name +' — '+ price +'</span>');
+    });
+  });
+  </script>
+  <?php
+}, 100 );
+
+// --- Open the Recommendations UI in a modal when "Get Recommendations" is clicked ---
+add_action('wp_footer', function () {
+    if (is_admin()) return;
+
+    // Hidden modal wrapper with your existing recommendations UI inside
+    // (no presets => the subject picker shows; if you want presets, pass [ifun_recommendations subject="VA" year="8"])
+    ?>
+    <div id="ifun-recs-modal"
+         style="display:none; position:fixed; inset:0; z-index:100000; background:rgba(0,0,0,.55);">
+      <div id="ifun-recs-modal-inner"
+           style="position:relative; margin:auto; max-width:1200px; width:96%; max-height:90vh; overflow:auto; background:#fff; border-radius:10px; box-shadow:0 12px 30px rgba(0,0,0,.25);">
+        <button type="button" id="ifun-recs-close"
+                style="position:sticky; top:0; float:right; margin:.5rem; background:#eee; border:0; border-radius:6px; padding:.4rem .6rem; cursor:pointer;">✕</button>
+        <?php echo do_shortcode('[ifun_recommendations]'); ?>
+      </div>
+    </div>
+    <script>
+    (function($){
+      function openRecsModal(){
+        $('#ifun-recs-modal').fadeIn(150);
+        $('body').css('overflow','hidden');
+      }
+      function closeRecsModal(){
+        $('#ifun-recs-modal').fadeOut(150, function(){ $('body').css('overflow',''); });
+      }
+      $(document).on('click', '#ifun-recs-close, #ifun-recs-modal', function(e){
+        if (e.target.id === 'ifun-recs-modal' || e.target.id === 'ifun-recs-close') closeRecsModal();
+      });
+
+    })(jQuery);
+    </script>
+    <?php
+}, 999);
+
+
+
