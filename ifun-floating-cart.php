@@ -38,7 +38,7 @@ add_action('wp_footer', function () {
   // Exclude common system/special pages
   if (function_exists('is_cart') && is_cart()) return;
   if (function_exists('is_checkout') && is_checkout()) return;
-  if (function_exists('is_account_page') && is_account_page()) return;
+//  if (function_exists('is_account_page') && is_account_page()) return;
   if (is_search() || is_404()) return;
   
     // Exclude “app-like” canvases by path/query
@@ -47,6 +47,8 @@ add_action('wp_footer', function () {
     if (strpos($req, '/rec-popup') !== false) return;   // << NEW
     if (strpos($req, '/v.html') !== false) return;         // PDF viewer
     if (strpos($req, '/view-pdf/') !== false) return;
+    if (strpos($req, '/send-to-others') !== false) return;
+
     
   if (!class_exists('WooCommerce') || !WC()->cart) return;
 
