@@ -82,6 +82,22 @@ if ( ! function_exists( 'get_book_type' ) ) {
         // default
         $type = 'us-book';
 
+        $cookie_country = $_COOKIE['ifun_geo_country'] ?? '';
+        if ($cookie_country === 'AU') {
+            return 'au-book';
+        }
+        if ($cookie_country === 'US') {
+            return 'us-book';
+        }
+
+        $cf_country = $_SERVER['HTTP_CF_IPCOUNTRY'] ?? '';
+        if ($cf_country === 'AU') {
+            return 'au-book';
+        }
+        if ($cf_country === 'US') {
+            return 'us-book';
+        }
+
         if ( function_exists( 'geoip_detect2_get_info_from_current_ip' ) ) {
             $info = geoip_detect2_get_info_from_current_ip();
             if ( ! empty( $info->country->isoCode ) && 'AU' === $info->country->isoCode ) {
