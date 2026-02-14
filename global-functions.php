@@ -151,8 +151,13 @@ add_action('init', function(){
     $ttl = 7 * DAY_IN_SECONDS;
     $secure = is_ssl();
     $http_only = false;
+    $host = wp_parse_url(home_url(), PHP_URL_HOST);
+    if ($host && strpos($host, 'www.') === 0) {
+        $host = substr($host, 4);
+    }
+    $cookie_domain = $host ? '.' . $host : COOKIE_DOMAIN;
 
-    setcookie($cookie_name, $country, time() + $ttl, COOKIEPATH, COOKIE_DOMAIN, $secure, $http_only);
+    setcookie($cookie_name, $country, time() + $ttl, COOKIEPATH, $cookie_domain, $secure, $http_only);
     $_COOKIE[$cookie_name] = $country;
 }, 1);
 
