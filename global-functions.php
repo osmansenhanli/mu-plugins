@@ -93,6 +93,23 @@ if ( ! function_exists( 'get_book_type' ) ) {
     }
 }
 
+// Simple GeoIP-based WooCommerce currency switch (AU -> AUD, else USD).
+add_filter('woocommerce_currency', function($currency){
+    if (is_admin()) {
+        return $currency;
+    }
+
+    $book_type = function_exists('get_book_type') ? get_book_type() : '';
+    if ($book_type === 'au-book') {
+        return 'AUD';
+    }
+    if ($book_type === 'us-book') {
+        return 'USD';
+    }
+
+    return $currency;
+}, 1, 1);
+
 /**
  * Plugin Name: Perfmatters PDF Viewer Exclusions
  */
