@@ -110,6 +110,269 @@ add_filter('woocommerce_currency', function($currency){
     return $currency;
 }, 1, 1);
 
+// Cloudflare Geo cookie helper: read CF-IPCountry and set ifun_geo_country cookie.
+add_action('init', function(){
+    if (is_admin()) {
+        return;
+    }
+
+    $header = $_SERVER['HTTP_CF_IPCOUNTRY'] ?? '';
+    if (!$header || $header === 'XX') {
+        return;
+    }
+
+    $country = strtoupper(trim($header));
+    if (!preg_match('/^[A-Z]{2}$/', $country)) {
+        return;
+    }
+
+    $cookie_name = 'ifun_geo_country';
+    $current = $_COOKIE[$cookie_name] ?? '';
+    if ($current === $country) {
+        return;
+    }
+
+    $ttl = 7 * DAY_IN_SECONDS;
+    $secure = is_ssl();
+    $http_only = false;
+
+    setcookie($cookie_name, $country, time() + $ttl, COOKIEPATH, COOKIE_DOMAIN, $secure, $http_only);
+    $_COOKIE[$cookie_name] = $country;
+}, 1);
+
+// Harden pricing panels + /books popups against stripped inline CSS/JS.
+add_action('wp_enqueue_scripts', function(){
+        if (is_admin()) {
+                return;
+        }
+
+        global $post;
+        if (!$post) {
+                return;
+        }
+
+        $content = $post->post_content ?? '';
+        $has_pricing = has_shortcode($content, 'license_pricing_table')
+                || strpos($content, 'js-pricing-toggle') !== false;
+        $has_popups = has_shortcode($content, 'ifun_compact_catalogue')
+                || has_shortcode($content, 'ifun_quiz_explain')
+                || strpos($content, 'id="order-guided"') !== false;
+
+        if (!$has_pricing && !$has_popups) {
+                return;
+        }
+
+        wp_register_style('ifun-page-fixes', false);
+        wp_enqueue_style('ifun-page-fixes');
+
+        $css = "";
+        if ($has_pricing) {
+                $css .= "body.ifun-js-pricing .pricing-panel.js-pricing-panel{display:none;}\n";
+                $css .= "body.ifun-js-pricing .pricing-panel.js-pricing-panel.is-open{display:block;}\n";
+        }
+        if ($has_popups) {
+                $css .= "body.ifun-js-popups #order-guided .popup{display:none;}\n";
+                $css .= "body.ifun-js-popups #order-guided .popup.active{display:flex;}\n";
+        }
+        if ($css) {
+                wp_add_inline_style('ifun-page-fixes', $css);
+        }
+
+        wp_register_script('ifun-page-fixes', '', [], null, true);
+        wp_enqueue_script('ifun-page-fixes');
+
+        $js = <<<'JS'
+(function(){
+    if (window.IFUN_PAGE_FIXES && window.IFUN_PAGE_FIXES.loaded) return;
+    window.IFUN_PAGE_FIXES = window.IFUN_PAGE_FIXES || {};
+    window.IFUN_PAGE_FIXES.loaded = true;
+
+    function initPricing(){
+        if (!document.querySelector('.js-pricing-toggle') || !document.querySelector('.js-pricing-panel')) return;
+        document.body.classList.add('ifun-js-pricing');
+
+        document.querySelectorAll('.js-pricing-panel').forEach(function(panel){
+            panel.hidden = true;
+            panel.classList.remove('is-open');
+        });
+
+        document.addEventListener('click', function(e){
+            var btn = e.target.closest('.js-pricing-toggle');
+            if (!btn) return;
+
+            e.preventDefault();
+
+            var scope = btn.closest('.pricing-block') || btn.closest('section, .container, .card') || document;
+            var panel = scope.querySelector('.js-pricing-panel');
+            if (!panel) {
+                var next = scope.nextElementSibling;
+                while (next && !(next.classList && next.classList.contains('js-pricing-panel'))) {
+                    next = next.nextElementSibling;
+                }
+                panel = next || null;
+            }
+            if (!panel) return;
+
+            var isOpen = panel.classList.contains('is-open');
+            panel.classList.toggle('is-open', !isOpen);
+            panel.hidden = isOpen;
+            btn.setAttribute('aria-expanded', String(!isOpen));
+
+            if (!isOpen) {
+                var r = panel.getBoundingClientRect();
+                var vh = window.innerHeight || document.documentElement.clientHeight;
+                var mostlyOut = r.top < 0 || r.bottom > vh;
+                if (mostlyOut && panel.scrollIntoView) {
+                    panel.scrollIntoView({ behavior:'smooth', block:'nearest' });
+                }
+            }
+        }, { passive:false });
+    }
+
+    function initPopups(){
+        var root = document.getElementById('order-guided');
+        if (!root) return;
+        document.body.classList.add('ifun-js-popups');
+
+        window.IFUN_CARDS = window.IFUN_CARDS || {};
+        IFUN_CARDS.ajaxUrl = IFUN_CARDS.ajaxUrl || '/wp-admin/admin-ajax.php';
+        IFUN_CARDS.nonce = IFUN_CARDS.nonce || '';
+
+        function fetchCards(el){
+            var raw = el.getAttribute('data-shortcode') || '';
+            var sc = raw.replace(/(\bajax\s*=\s*")(?:true|1)(")/i, '$1false$2');
+            var pg = el.getAttribute('data-page') || '1';
+            var fd = new FormData();
+            fd.append('action','ifun_product_cards');
+            fd.append('shortcode', sc);
+            fd.append('page', pg);
+            if (IFUN_CARDS.nonce) fd.append('_ajax_nonce', IFUN_CARDS.nonce);
+
+            el.setAttribute('aria-busy','true');
+            el.innerHTML = '<div class="ifun-cards-loading" style="padding:24px;text-align:center">Loading...</div>';
+
+            var url = IFUN_CARDS.ajaxUrl || '/wp-admin/admin-ajax.php';
+            fetch(url, { method:'POST', credentials:'same-origin', body: fd })
+                .then(function(r){ return r.text().then(function(text){ return { ok:r.ok, status:r.status, text:text }; }); })
+                .then(function(res){
+                    if (!res.ok) throw new Error('HTTP ' + res.status + (res.text ? ' - ' + res.text : ''));
+                    if (!res.text || res.text === '0') throw new Error('Empty response (handler not loaded?)');
+                    el.innerHTML = res.text;
+                    el.removeAttribute('aria-busy');
+                })
+                .catch(function(err){
+                    console.error('IFUN cards error:', err);
+                    el.innerHTML = '<div style="padding:24px;text-align:center">Could not load products.<br><small>' +
+                                                 String(err.message) + '</small></div>';
+                    el.removeAttribute('aria-busy');
+                });
+        }
+
+        document.addEventListener('DOMContentLoaded', function(){
+            document.querySelectorAll('.ifun-cards[data-shortcode]').forEach(fetchCards);
+        });
+
+        window.ifunReloadCards = function(selector){
+            document.querySelectorAll(selector).forEach(function(el){
+                el.removeAttribute('data-page');
+                fetchCards(el);
+            });
+        };
+
+        var lastFocus = null;
+        var getOpen = function(){ return Array.from(document.querySelectorAll('#order-guided .popup.active')); };
+        function openModal(id){
+            var m = document.getElementById(id);
+            if (!m) return;
+            m.classList.add('active');
+            m.setAttribute('aria-hidden','false');
+            document.body.style.overflow = 'hidden';
+            if (window.ifunReloadCards) window.ifunReloadCards('#' + id + ' .ifun-cards');
+            var f = m.querySelector('button,[href],input,select,textarea,[tabindex]:not([tabindex="-1"])');
+            (f || m).focus();
+        }
+        function closeModal(m){
+            if (!m) return;
+            m.classList.remove('active');
+            m.setAttribute('aria-hidden','true');
+            if (getOpen().length === 0) document.body.style.overflow = '';
+        }
+        function switchModal(id, opener){
+            lastFocus = opener || document.activeElement;
+            var open = getOpen();
+            if (open.length) {
+                open.forEach(closeModal);
+                requestAnimationFrame(function(){ openModal(id); });
+            } else {
+                openModal(id);
+            }
+        }
+
+        root.addEventListener('click', function(e){
+            var opener = e.target.closest('[data-open]');
+            if (opener && root.contains(opener)){
+                e.preventDefault();
+                e.stopPropagation();
+                var id = opener.getAttribute('data-open');
+                var already = document.getElementById(id) && document.getElementById(id).classList.contains('active');
+                if (!already) switchModal(id, opener);
+                return false;
+            }
+
+            var closer = e.target.closest('.popup-close');
+            if (closer){
+                e.preventDefault();
+                closeModal(closer.closest('.popup'));
+                if (lastFocus) lastFocus.focus();
+                return false;
+            }
+
+            var overlay = e.target.classList && e.target.classList.contains('popup') ? e.target : null;
+            if (overlay){
+                closeModal(overlay);
+                if (lastFocus) lastFocus.focus();
+                return false;
+            }
+        });
+
+        document.addEventListener('keydown', function(e){
+            if (e.key === 'Escape'){
+                var open = getOpen().pop();
+                if (open) closeModal(open);
+                if (lastFocus) lastFocus.focus();
+            }
+            if (e.key === 'Tab'){
+                var openModalEl = getOpen().pop();
+                if (!openModalEl) return;
+                var focusables = openModalEl.querySelectorAll('button,[href],input,select,textarea,[tabindex]:not([tabindex="-1"])');
+                if (!focusables.length) return;
+                var first = focusables[0];
+                var last = focusables[focusables.length - 1];
+                if (e.shiftKey && document.activeElement === first){
+                    e.preventDefault();
+                    last.focus();
+                } else if (!e.shiftKey && document.activeElement === last){
+                    e.preventDefault();
+                    first.focus();
+                }
+            }
+        });
+
+        var params = new URLSearchParams(window.location.search || '');
+        var openId = params.get('open') || (window.location.hash && window.location.hash.replace('#',''));
+        if (openId){
+            openModal(openId);
+        }
+    }
+
+    initPricing();
+    initPopups();
+})();
+JS;
+
+        wp_add_inline_script('ifun-page-fixes', $js);
+}, 20);
+
 /**
  * Plugin Name: Perfmatters PDF Viewer Exclusions
  */
