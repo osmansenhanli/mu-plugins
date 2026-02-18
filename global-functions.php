@@ -8,6 +8,30 @@
 
 // In functions.php or an MU-plugin:
 
+/**
+ * Temporary diagnostic: force cacheable headers on public pages.
+ * Remove this once we identify the real source of "private" headers.
+ */
+add_action('send_headers', function () {
+
+  // Don't interfere with wp-admin/admin-ajax.
+  if (is_admin()) return;
+
+  // Don't cache Woo sensitive pages.
+  if (function_exists('is_cart') && is_cart()) return;
+  if (function_exists('is_checkout') && is_checkout()) return;
+  if (function_exists('is_account_page') && is_account_page()) return;
+
+  // Remove any existing cache-control coming from elsewhere.
+  header_remove('Cache-Control');
+  header_remove('Pragma');
+  header_remove('Expires');
+  header_remove('cf-edge-cache');
+
+  // Allow proxy caching (Varnish/Cloudflare). Browser can still revalidate.
+  header('Cache-Control: public, max-age=0, s-maxage=3600');
+}, 0);
+
 /**************** PAGE REDIRECTS ****************************************/
 
 // Redirect product category pages to the /books page
@@ -111,7 +135,7 @@ if ( ! function_exists( 'get_book_type' ) ) {
 
 // Simple GeoIP-based WooCommerce currency switch (AU -> AUD, else USD).
 add_filter('woocommerce_currency', function($currency){
-    if (is_admin()) {
+    if (is_admin() && !(defined('DOING_AJAX') && DOING_AJAX)) {
         return $currency;
     }
 
