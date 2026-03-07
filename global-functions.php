@@ -95,6 +95,18 @@ add_action('wp_head', function () {
   <?php
 }, 99);
 
+// Front-page meta description (skip if common SEO plugins are active).
+add_action('wp_head', function () {
+    if (!function_exists('is_front_page') || !is_front_page()) return;
+
+    if (defined('WPSEO_VERSION') || defined('RANK_MATH_VERSION')) return;
+    if (class_exists('AIOSEO\\Plugin\\AIOSEO')) return;
+    if (defined('THE_SEO_FRAMEWORK_VERSION')) return;
+
+    $desc = 'Learning Skills Activities help teachers build independent student thinking in Visual Arts, STEM, Music and Dance. Five quick routines, no student login.';
+    echo "\n" . '<meta name="description" content="' . esc_attr($desc) . '">' . "\n";
+}, 5);
+
 
 
 /*************************************************************************
