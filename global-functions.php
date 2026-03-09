@@ -479,9 +479,11 @@ if ( ! function_exists( 'ifun_geoip_get_info' ) ) {
  * @param string $to Recipient email.
  * @param string $subject Email subject.
  * @param string $message Email body.
+ * @param array|string $headers Optional email headers.
+ * @param string $user_email Optional WP user email for personalized signature.
  */
 if ( ! function_exists( 'ifun_send_mail' ) ) {
-    function ifun_send_mail($to, $subject, $message, $headers = array()) {
+    function ifun_send_mail($to, $subject, $message, $headers = array(), $user_email = '') {
         $from = "services@ifunlearning.com";
         
         // Default headers
@@ -504,9 +506,37 @@ if ( ! function_exists( 'ifun_send_mail' ) ) {
         
         // Convert newlines to <br> tags so that they display in HTML.
         $message = nl2br($message);
-        
+
+        $signature_name = 'Services Team';
+        $signature_email = 'services@ifunlearning.com';
+
+        $candidate_email = sanitize_email((string) $user_email);
+        if ($candidate_email !== '' && is_email($candidate_email)) {
+            $user = get_user_by('email', $candidate_email);
+            if ($user) {
+                $display_name = trim((string) $user->display_name);
+                if ($display_name === '') {
+                    $first = trim((string) get_user_meta($user->ID, 'first_name', true));
+                    $last = trim((string) get_user_meta($user->ID, 'last_name', true));
+                    $display_name = trim($first . ' ' . $last);
+                }
+                if ($display_name === '') {
+                    $display_name = trim((string) $user->user_login);
+                }
+
+                if ($display_name !== '') {
+                    $signature_name = $display_name;
+                }
+
+                $signature_email = sanitize_email((string) $user->user_email);
+                if ($signature_email === '') {
+                    $signature_email = $candidate_email;
+                }
+            }
+        }
+
         // Append a signature using HTML line breaks.
-        $signature = "<br>Best regards,<br>Services Team<br>services@ifunlearning.com<br><a href='https://ifunlearning.com'>iFunLearning</a>";
+        $signature = "<br>Best regards,<br>" . esc_html($signature_name) . "<br>" . esc_html($signature_email) . "<br><a href='https://ifunlearning.com'>iFunLearning</a>";
         $message .= $signature;
         
         return wp_mail($to, $subject, $message, $headers);
